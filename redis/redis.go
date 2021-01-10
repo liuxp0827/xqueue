@@ -3,28 +3,54 @@ package redis
 import (
 	"context"
 	"encoding/json"
-	"github.com/gomodule/redigo/redis"
-	"github.com/liuxp0827/xqueue"
+	"fmt"
 	"sync"
+
+	"github.com/go-redis/redis"
+	"github.com/liuxp0827/xqueue"
 )
 
 type RedisQueue struct {
-	p    *redis.Pool
-	lock sync.RWMutex
+	config xqueue.QueueConfig
+	client *redis.Client
+	lock   sync.RWMutex
+}
+
+func (rq *RedisQueue) topic() string {
+	return rq.config.Topic
+}
+
+func (rq *RedisQueue) groupId() string {
+	return rq.config.GroupId
+}
+func (rq *RedisQueue) tags() []string {
+	return rq.config.Tags
 }
 
 func (rq *RedisQueue) Enqueue(ctx context.Context, msg xqueue.Message) error {
-	return nil
+	client := rq.client.WithContext(ctx)
+	return client.RPush(msg.GetTopic(), msg.GetData()).Err()
 }
 
 func (rq *RedisQueue) Dequeue(ctx context.Context) (xqueue.Message, error) {
-	return &RedisMessage{}, nil
+	client := rq.client.WithContext(ctx)
+	data, err := client.LPop(rq.topic()).Bytes()
+	if err != nil {
+		return nil, err
+	}
+	return &RedisMessage{
+		Topic:   rq.topic(),
+		GroupId: rq.groupId(),
+		Tags:    rq.tags(),
+		Data:    data,
+	}, nil
 }
 
 type RedisMessage struct {
-	Topic string
-	Tags  []string
-	Data  []byte
+	Topic   string
+	GroupId string
+	Tags    []string
+	Data    []byte
 }
 
 func (rm *RedisMessage) GetTopic() string {
@@ -43,6 +69,14 @@ func (rm *RedisMessage) GetTags() []string {
 	return rm.Tags
 }
 
+func (rm *RedisMessage) SetGroupId(gid string) {
+	rm.GroupId = gid
+}
+
+func (rm *RedisMessage) GetGroupId() string {
+	return rm.GroupId
+}
+
 func (rm *RedisMessage) SetData(data []byte) {
 	rm.Data = data
 }
@@ -54,6 +88,9 @@ func (rm *RedisMessage) GetData() []byte {
 func (rm *RedisMessage) MessageId() string {
 	return ""
 }
+func (rm *RedisMessage) DequeueCount() int64 { // 已出队消费次数
+	return 0
+}
 
 // Provider redis session provider
 type Provider struct {
@@ -63,7 +100,6 @@ type Provider struct {
 	poolsize    int
 	password    string
 	dbNum       int
-	pool        *redis.Pool
 	queue       *RedisQueue
 }
 
@@ -88,42 +124,27 @@ type Config struct {
 		"timeout": 10
 	}
 */
-func (rp *Provider) QueueInit(config string) error {
-	err := json.Unmarshal([]byte(config), &rp.config)
-	if err != nil {
-		return err
-	}
-	pool := &redis.Pool{
-		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", rp.savePath)
-			if err != nil {
-				return nil, err
-			}
-			if rp.password != "" {
-				if _, err = c.Do("AUTH", rp.password); err != nil {
-					_ = c.Close()
-					return nil, err
-				}
-			}
-			if rp.dbNum > 0 {
-				_, err = c.Do("SELECT", rp.dbNum)
-				if err != nil {
-					_ = c.Close()
-					return nil, err
-				}
-			}
-			return c, err
-		},
-		MaxIdle: rp.poolsize,
-	}
+func (rp *Provider) QueueInit(config xqueue.QueueConfig) error {
 	if rp.queue == nil {
+		err := json.Unmarshal([]byte(config.ProviderJsonConfig), &rp.config)
+		if err != nil {
+			return err
+		}
+		client := redis.NewClient(&redis.Options{
+			Network:    "tcp",
+			Addr:       fmt.Sprintf("%s:%d", rp.config.Ip, rp.config.Port),
+			Password:   rp.config.Password,
+			DB:         rp.config.DbNum,
+			MaxRetries: 3,
+			PoolSize:   rp.poolsize,
+		})
+
 		rp.queue = &RedisQueue{
-			p:    nil,
-			lock: sync.RWMutex{},
+			config: config,
+			client: client,
+			lock:   sync.RWMutex{},
 		}
 	}
-	rp.queue.p = pool
-
 	return nil
 }
 
@@ -132,7 +153,7 @@ func (rp *Provider) Queue() (xqueue.Queue, error) {
 }
 
 func (rp *Provider) QueueDestroy() error {
-	return rp.queue.p.Close()
+	return rp.queue.client.Close()
 }
 
 func init() {

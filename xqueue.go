@@ -15,15 +15,26 @@ type Message interface {
 	GetTopic() string
 	SetTags([]string)
 	GetTags() []string
+	SetGroupId(string)
+	GetGroupId() string
 	SetData([]byte)
 	GetData() []byte
 	MessageId() string
+	DequeueCount() int64 // 已出队消费次数
 }
 
 type Provider interface {
-	QueueInit(config string) error
+	QueueInit(config QueueConfig) error
 	Queue() (Queue, error)
 	QueueDestroy() error
+}
+
+type QueueConfig struct {
+	Topic              string
+	Tags               []string
+	InstanceId         string
+	GroupId            string
+	ProviderJsonConfig string // 各种mq实现中间件的配置(redis,rocketmq,kafka等配置), JSON
 }
 
 var provides = make(map[string]Provider)
@@ -50,10 +61,10 @@ func GetProvider(name string) (Provider, error) {
 // Manager contains Provider and its configuration.
 type Manager struct {
 	provider Provider
-	config   string
+	config   QueueConfig
 }
 
-func NewManager(provideName string, config string) (*Manager, error) {
+func NewManager(provideName string, config QueueConfig) (*Manager, error) {
 	provider, ok := provides[provideName]
 	if !ok {
 		return nil, fmt.Errorf("queue: unknown provide %q (forgotten import?)", provideName)
@@ -65,8 +76,8 @@ func NewManager(provideName string, config string) (*Manager, error) {
 	}
 
 	return &Manager{
-		provider,
-		config,
+		provider: provider,
+		config:   config,
 	}, nil
 }
 
