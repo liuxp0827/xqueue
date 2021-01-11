@@ -10,97 +10,93 @@ import (
 	"github.com/liuxp0827/xqueue"
 )
 
-type RedisQueue struct {
+type Queue struct {
+	ctx    context.Context
 	config xqueue.QueueConfig
 	client *redis.Client
 	lock   sync.RWMutex
 }
 
-func (rq *RedisQueue) topic() string {
-	return rq.config.Topic
+func (q *Queue) topic() string {
+	return q.config.Topic
 }
 
-func (rq *RedisQueue) groupId() string {
-	return rq.config.GroupId
+func (q *Queue) groupId() string {
+	return q.config.GroupId
 }
-func (rq *RedisQueue) tags() []string {
-	return rq.config.Tags
+func (q *Queue) tags() []string {
+	return q.config.Tags
 }
 
-func (rq *RedisQueue) Enqueue(ctx context.Context, msg xqueue.Message) error {
-	client := rq.client.WithContext(ctx)
+func (q *Queue) Enqueue(ctx context.Context, msg xqueue.Message) error {
+	client := q.client.WithContext(ctx)
 	return client.RPush(msg.GetTopic(), msg.GetData()).Err()
 }
 
-func (rq *RedisQueue) Dequeue(ctx context.Context) (xqueue.Message, error) {
-	client := rq.client.WithContext(ctx)
-	data, err := client.LPop(rq.topic()).Bytes()
+func (q *Queue) Dequeue(ctx context.Context) (xqueue.Message, error) {
+	client := q.client.WithContext(ctx)
+	data, err := client.LPop(q.topic()).Bytes()
 	if err != nil {
 		return nil, err
 	}
-	return &RedisMessage{
-		Topic:   rq.topic(),
-		GroupId: rq.groupId(),
-		Tags:    rq.tags(),
+	return &Message{
+		Topic:   q.topic(),
+		GroupId: q.groupId(),
+		Tags:    q.tags(),
 		Data:    data,
 	}, nil
 }
 
-type RedisMessage struct {
+type Message struct {
 	Topic   string
 	GroupId string
 	Tags    []string
 	Data    []byte
 }
 
-func (rm *RedisMessage) GetTopic() string {
+func (rm *Message) GetTopic() string {
 	return rm.Topic
 }
 
-func (rm *RedisMessage) SetTopic(topic string) {
+func (rm *Message) SetTopic(topic string) {
 	rm.Topic = topic
 }
 
-func (rm *RedisMessage) SetTags(tags []string) {
+func (rm *Message) SetTags(tags []string) {
 	rm.Tags = tags
 }
 
-func (rm *RedisMessage) GetTags() []string {
+func (rm *Message) GetTags() []string {
 	return rm.Tags
 }
 
-func (rm *RedisMessage) SetGroupId(gid string) {
+func (rm *Message) SetGroupId(gid string) {
 	rm.GroupId = gid
 }
 
-func (rm *RedisMessage) GetGroupId() string {
+func (rm *Message) GetGroupId() string {
 	return rm.GroupId
 }
 
-func (rm *RedisMessage) SetData(data []byte) {
+func (rm *Message) SetData(data []byte) {
 	rm.Data = data
 }
 
-func (rm *RedisMessage) GetData() []byte {
+func (rm *Message) GetData() []byte {
 	return rm.Data
 }
 
-func (rm *RedisMessage) MessageId() string {
+func (rm *Message) MessageId() string {
 	return ""
 }
-func (rm *RedisMessage) DequeueCount() int64 { // 已出队消费次数
+func (rm *Message) DequeueCount() int64 { // 已出队消费次数
 	return 0
 }
 
 // Provider redis session provider
 type Provider struct {
-	config      Config
-	maxlifetime int64
-	savePath    string
-	poolsize    int
-	password    string
-	dbNum       int
-	queue       *RedisQueue
+	config Config
+	queue  *Queue
 }
 
 var redispder = &Provider{}
@@ -124,22 +120,23 @@ type Config struct {
 		"timeout": 10
 	}
 */
-func (rp *Provider) QueueInit(config xqueue.QueueConfig) error {
-	if rp.queue == nil {
-		err := json.Unmarshal([]byte(config.ProviderJsonConfig), &rp.config)
+func (p *Provider) QueueInit(ctx context.Context, config xqueue.QueueConfig) error {
+	if p.queue == nil {
+		err := json.Unmarshal([]byte(config.ProviderJsonConfig), &p.config)
 		if err != nil {
 			return err
 		}
 		client := redis.NewClient(&redis.Options{
 			Network:    "tcp",
-			Addr:       fmt.Sprintf("%s:%d", rp.config.Ip, rp.config.Port),
-			Password:   rp.config.Password,
-			DB:         rp.config.DbNum,
+			Addr:       fmt.Sprintf("%s:%d", p.config.Ip, p.config.Port),
+			Password:   p.config.Password,
+			DB:         p.config.DbNum,
 			MaxRetries: 3,
-			PoolSize:   rp.poolsize,
+			PoolSize:   p.config.PoolSize,
 		})
 
-		rp.queue = &RedisQueue{
+		p.queue = &Queue{
+			ctx:    ctx,
 			config: config,
 			client: client,
 			lock:   sync.RWMutex{},
@@ -148,12 +145,12 @@ func (rp *Provider) QueueInit(config xqueue.QueueConfig) error {
 	return nil
 }
 
-func (rp *Provider) Queue() (xqueue.Queue, error) {
-	return rp.queue, nil
+func (p *Provider) Queue() (xqueue.Queue, error) {
+	return p.queue, nil
 }
 
-func (rp *Provider) QueueDestroy() error {
-	return rp.queue.client.Close()
+func (p *Provider) QueueDestroy() error {
+	return p.queue.client.Close()
 }
 
 func init() {

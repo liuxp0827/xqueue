@@ -24,7 +24,7 @@ type Message interface {
 }
 
 type Provider interface {
-	QueueInit(config QueueConfig) error
+	QueueInit(ctx context.Context, config QueueConfig) error
 	Queue() (Queue, error)
 	QueueDestroy() error
 }
@@ -64,13 +64,13 @@ type Manager struct {
 	config   QueueConfig
 }
 
-func NewManager(provideName string, config QueueConfig) (*Manager, error) {
+func NewManager(ctx context.Context, provideName string, config QueueConfig) (*Manager, error) {
 	provider, ok := provides[provideName]
 	if !ok {
 		return nil, fmt.Errorf("queue: unknown provide %q (forgotten import?)", provideName)
 	}
 
-	err := provider.QueueInit(config)
+	err := provider.QueueInit(ctx, config)
 	if err != nil {
 		return nil, err
 	}
