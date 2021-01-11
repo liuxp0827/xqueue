@@ -40,56 +40,57 @@ func (q *Queue) Dequeue(ctx context.Context) (xqueue.Message, error) {
 		return nil, err
 	}
 	return &Message{
-		Topic:   q.topic(),
-		GroupId: q.groupId(),
-		Tags:    q.tags(),
-		Data:    data,
+		topic:   q.topic(),
+		groupId: q.groupId(),
+		tags:    q.tags(),
+		data:    data,
 	}, nil
 }
 
 type Message struct {
-	Topic   string
-	GroupId string
-	Tags    []string
-	Data    []byte
+	topic     string
+	groupId   string
+	tags      []string
+	data      []byte
+	messageId string
 }
 
-func (rm *Message) GetTopic() string {
-	return rm.Topic
+func (m *Message) GetTopic() string {
+	return m.topic
 }
 
-func (rm *Message) SetTopic(topic string) {
-	rm.Topic = topic
+func (m *Message) SetTopic(topic string) {
+	m.topic = topic
 }
 
-func (rm *Message) SetTags(tags []string) {
-	rm.Tags = tags
+func (m *Message) SetTags(tags []string) {
+	m.tags = tags
 }
 
-func (rm *Message) GetTags() []string {
-	return rm.Tags
+func (m *Message) GetTags() []string {
+	return m.tags
 }
 
-func (rm *Message) SetGroupId(gid string) {
-	rm.GroupId = gid
+func (m *Message) SetGroupId(gid string) {
+	m.groupId = gid
 }
 
-func (rm *Message) GetGroupId() string {
-	return rm.GroupId
+func (m *Message) GetGroupId() string {
+	return m.groupId
 }
 
-func (rm *Message) SetData(data []byte) {
-	rm.Data = data
+func (m *Message) SetData(data []byte) {
+	m.data = data
 }
 
-func (rm *Message) GetData() []byte {
-	return rm.Data
+func (m *Message) GetData() []byte {
+	return m.data
 }
 
-func (rm *Message) MessageId() string {
+func (m *Message) MessageId() string {
 	return ""
 }
-func (rm *Message) DequeueCount() int64 { // 已出队消费次数
+func (m *Message) DequeueCount() int64 { // 已出队消费次数
 	return 0
 }
 

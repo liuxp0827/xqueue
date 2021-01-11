@@ -86,59 +86,65 @@ func (q *Queue) Enqueue(ctx context.Context, msg xqueue.Message) error {
 }
 
 func (q *Queue) Dequeue(ctx context.Context) (xqueue.Message, error) {
-	msg, ok := <-q.consumerMessageChan
-	if !ok {
-		return nil, fmt.Errorf("closed chan")
+	select {
+	case msg, ok := <-q.consumerMessageChan:
+		if !ok {
+			return nil, fmt.Errorf("closed chan")
+		}
+		return &Message{
+			topic:     msg.Topic,
+			groupId:   q.groupId(),
+			tags:      strings.Split(msg.GetTags(), "||"),
+			data:      msg.Body,
+			messageId: msg.MsgId,
+		}, nil
+	case <-ctx.Done():
+		return nil, nil
 	}
-	return &Message{
-		Topic:   msg.Topic,
-		GroupId: q.groupId(),
-		Tags:    strings.Split(msg.GetTags(), "||"),
-		Data:    msg.Body,
-	}, nil
 }
 
 type Message struct {
-	Topic   string
-	GroupId string
-	Tags    []string
-	Data    []byte
+	topic     string
+	groupId   string
+	tags      []string
+	data      []byte
+	messageId string
 }
 
 func (m *Message) GetTopic() string {
-	return m.Topic
+	return m.topic
 }
 
 func (m *Message) SetTopic(topic string) {
-	m.Topic = topic
+	m.topic = topic
 }
 
 func (m *Message) SetTags(tags []string) {
-	m.Tags = tags
+	m.tags = tags
 }
 
 func (m *Message) GetTags() []string {
-	return m.Tags
+	return m.tags
 }
 
 func (m *Message) SetGroupId(gid string) {
-	m.GroupId = gid
+	m.groupId = gid
 }
 
 func (m *Message) GetGroupId() string {
-	return m.GroupId
+	return m.groupId
 }
 
 func (m *Message) SetData(data []byte) {
-	m.Data = data
+	m.data = data
 }
 
 func (m *Message) GetData() []byte {
-	return m.Data
+	return m.data
 }
 
 func (m *Message) MessageId() string {
-	return ""
+	return m.messageId
 }
 func (m *Message) DequeueCount() int64 { // 已出队消费次数
 	return 0
@@ -177,80 +183,80 @@ type Config struct {
 		"timeout": 10
 	}
 */
-func (rp *Provider) QueueInit(ctx context.Context, config xqueue.QueueConfig) error {
-	if rp.queue == nil {
-		err := json.Unmarshal([]byte(config.ProviderJsonConfig), &rp.config)
+func (p *Provider) QueueInit(ctx context.Context, config xqueue.QueueConfig) error {
+	if p.queue == nil {
+		err := json.Unmarshal([]byte(config.ProviderJsonConfig), &p.config)
 		if err != nil {
 			return err
 		}
 		var (
-			c rocketmq.PushConsumer = nil
-			p rocketmq.Producer     = nil
+			cs rocketmq.PushConsumer = nil
+			pd rocketmq.Producer     = nil
 		)
 
-		if rp.config.EnableConsumer {
+		if p.config.EnableConsumer {
 			consumerOptions := []consumer.Option{
-				consumer.WithNameServer([]string{rp.config.EndPoint}),
+				consumer.WithNameServer([]string{p.config.EndPoint}),
 				consumer.WithCredentials(primitive.Credentials{
-					AccessKey: rp.config.AccessKey,
-					SecretKey: rp.config.SecretKey,
+					AccessKey: p.config.AccessKey,
+					SecretKey: p.config.SecretKey,
 				}),
-				consumer.WithGroupName(rp.config.GroupId),
-				consumer.WithNamespace(rp.config.InstanceId),
-				consumer.WithConsumerModel(rp.config.MessageModel),
-				consumer.WithConsumeFromWhere(rp.config.ConsumeFromWhere),
-				consumer.WithAutoCommit(rp.config.WithAutoCommit),
-				consumer.WithConsumerOrder(rp.config.WithOrder),
+				consumer.WithGroupName(p.config.GroupId),
+				consumer.WithNamespace(p.config.InstanceId),
+				consumer.WithConsumerModel(p.config.MessageModel),
+				consumer.WithConsumeFromWhere(p.config.ConsumeFromWhere),
+				consumer.WithAutoCommit(p.config.WithAutoCommit),
+				consumer.WithConsumerOrder(p.config.WithOrder),
 			}
-			c, err = rocketmq.NewPushConsumer(consumerOptions...)
+			cs, err = rocketmq.NewPushConsumer(consumerOptions...)
 			if err != nil {
 				return err
 			}
 		}
 
-		if rp.config.EnableProducer {
+		if p.config.EnableProducer {
 			producerOptions := []producer.Option{
-				producer.WithNameServer([]string{rp.config.EndPoint}),
+				producer.WithNameServer([]string{p.config.EndPoint}),
 				producer.WithCredentials(primitive.Credentials{
-					AccessKey: rp.config.AccessKey,
-					SecretKey: rp.config.SecretKey,
+					AccessKey: p.config.AccessKey,
+					SecretKey: p.config.SecretKey,
 				}),
 				producer.WithRetry(2),
-				producer.WithGroupName(rp.config.GroupId),
-				producer.WithNamespace(rp.config.InstanceId),
+				producer.WithGroupName(p.config.GroupId),
+				producer.WithNamespace(p.config.InstanceId),
 			}
-			p, err = rocketmq.NewProducer(producerOptions...)
+			pd, err = rocketmq.NewProducer(producerOptions...)
 			if err != nil {
 				return err
 			}
 		}
 
-		rp.queue = &Queue{
+		p.queue = &Queue{
 			ctx:      ctx,
 			config:   config,
-			consumer: c,
-			producer: p,
+			consumer: cs,
+			producer: pd,
 			lock:     sync.RWMutex{},
 		}
-		return rp.queue.init()
+		return p.queue.init()
 	}
 	return nil
 }
 
-func (rp *Provider) Queue() (xqueue.Queue, error) {
-	return rp.queue, nil
+func (p *Provider) Queue() (xqueue.Queue, error) {
+	return p.queue, nil
 }
 
-func (rp *Provider) QueueDestroy() error {
-	if rp.queue != nil {
-		if rp.queue.consumer != nil {
-			err := rp.queue.consumer.Shutdown()
+func (p *Provider) QueueDestroy() error {
+	if p.queue != nil {
+		if p.queue.consumer != nil {
+			err := p.queue.consumer.Shutdown()
 			if err != nil {
 				return err
 			}
 		}
-		if rp.queue.producer != nil {
-			return rp.queue.producer.Shutdown()
+		if p.queue.producer != nil {
+			return p.queue.producer.Shutdown()
 		}
 	}
 	return nil
