@@ -52,6 +52,7 @@ func (q *Queue) init() error {
 			return q.consumer.Start()
 		})
 	}
+
 	if q.producer != nil {
 		eg.Go(func() error {
 			return q.producer.Start()
@@ -72,7 +73,9 @@ func (q *Queue) tags() []string {
 }
 
 func (q *Queue) Enqueue(ctx context.Context, msg xqueue.Message) error {
-
+	if q.producer == nil {
+		return fmt.Errorf("producer no init")
+	}
 	m := &primitive.Message{
 		Topic: q.topic(),
 		Body:  msg.GetData(),
@@ -86,6 +89,9 @@ func (q *Queue) Enqueue(ctx context.Context, msg xqueue.Message) error {
 }
 
 func (q *Queue) Dequeue(ctx context.Context) (xqueue.Message, error) {
+	if q.consumer == nil || q.consumerMessageChan == nil {
+		return nil, fmt.Errorf("consumer no init")
+	}
 	select {
 	case msg, ok := <-q.consumerMessageChan:
 		if !ok {
@@ -159,18 +165,18 @@ type Provider struct {
 var rocketmqpder = &Provider{}
 
 type Config struct {
-	EnableConsumer   bool
-	EnableProducer   bool
-	Tags             []string
-	EndPoint         string
-	AccessKey        string
-	SecretKey        string
-	GroupId          string
-	InstanceId       string
-	MessageModel     consumer.MessageModel
-	ConsumeFromWhere consumer.ConsumeFromWhere
-	WithAutoCommit   bool
-	WithOrder        bool
+	EnableConsumer   bool                      `json:"enable_consumer"`
+	EnableProducer   bool                      `json:"enable_producer"`
+	Tags             []string                  `json:"tags"`
+	EndPoint         string                    `json:"end_point"`
+	AccessKey        string                    `json:"access_key"`
+	SecretKey        string                    `json:"secret_key"`
+	GroupId          string                    `json:"group_id"`
+	InstanceId       string                    `json:"instance_id"`
+	MessageModel     consumer.MessageModel     `json:"message_model"`
+	ConsumeFromWhere consumer.ConsumeFromWhere `json:"consume_from_where"`
+	WithAutoCommit   bool                      `json:"with_auto_commit"`
+	WithOrder        bool                      `json:"with_order"`
 }
 
 /*
